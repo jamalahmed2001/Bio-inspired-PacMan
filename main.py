@@ -26,7 +26,7 @@ room = Room(room_x, room_y, room_width, room_height, BLUE)
 
 running = True
 while running:
-    #create Environment 
+    # create Environment
     screen.fill(BLACK)
     room.draw(screen)
 
@@ -39,7 +39,7 @@ while running:
             running = False
             sys.exit()
 
-    pacman.userControl(pygame,room)
+    pacman.userControl(pygame, room)
 
     # Update the display
     pygame.display.flip()
