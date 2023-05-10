@@ -138,7 +138,15 @@ class Moveable():
         self.y = y
         self.color = color
 
-    def control(self):
+    # controls movement of the object
+    def control(self, movers):
+
+        for mover in movers:
+            self.collision(mover)
+
+        if isinstance(self, PacMan):
+            self.dotCollision()
+
         if self.dir == "left":
             self.move(-1, 0)
         elif self.dir == "right":
@@ -148,53 +156,28 @@ class Moveable():
         elif self.dir == "down":
             self.move(0, 1)
 
+            # defines how to move to a new position
     def move(self, dx, dy):
         self.x = self.x + dx * self.velocity
         self.y = self.y + dy * self.velocity
         self.rect.x = self.x-self.size + dx * self.velocity
         self.rect.y = self.y-self.size + dy * self.velocity
 
-    def collision(self):
-        self.dir = random_dir()
-        # if self.dir == "left":
-        #     self.dir = "right"
-        #     # self.move(1, 0)  # move right
-        # elif self.dir == "down":
-        #     self.dir = "down"
-        #     # self.move(0, -1)  # move up
-        # elif self.dir == "right":
-        #     self.dir = "left"
-        #     # self.move(-1, 0)  # move left
-        # elif self.dir == "up":
-        #     self.dir = "down"
-        #     # self.move(0, 1)  # move right
-        self.control()
-
-    def wallCollision(self):
+    # detect wall collisions
+    def collision(self, collider):
+        coll = False
         for wall in walls:
             if self.rect.colliderect(wall):
-                if isinstance(self, PacMan):
-                    self.velocity = 0
-                else:
-                    self.collision()
+                coll = True
+        if self is not collider and self.rect.colliderect(collider.rect):
+            coll = True
+        if coll and isinstance(self, PacMan):
+            self.velocity = 0
+        if coll:
+            self.dir = random_dir()
 
     def get_position(self):
         return self.x, self.y
-
-    def moveableCollision(self, collider):
-        if self.rect.colliderect(collider.rect) and self is not collider:
-            if isinstance(self, PacMan) and isinstance(collider, Ghost):
-                self.velocity = 0
-                collider.collision()
-                # self.velocity = 0
-                # collider.velocity = 0
-                # print("Game over!")
-            elif isinstance(self, Ghost) and isinstance(collider, PacMan):
-                self.collision()
-                collider.velocity = 0
-            else:
-                self.collision()
-                collider.collision()
 
     def get_distance_from(self, mover):
         if self is not mover:
@@ -227,7 +210,7 @@ class Ghost(Moveable):
     def __init__(self, x, y, dir, color):
         super(Ghost, self).__init__(x, y, color)
         self.size = TILE_SIZE//2
-        self.velocity = 0.2
+        self.velocity = 0.4
         self.dir = dir
         self.rect = pygame.Rect(
             self.x-self.size, self.y-self.size, self.size*2, self.size*2)
