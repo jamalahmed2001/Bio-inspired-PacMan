@@ -11,7 +11,7 @@ pygame.display.set_caption("Pac-Man")
 font = pygame.font.Font(None, 36)
 
 # Create Room instance
-room = Room(1)  # 0 is the empty box, 1 is the easy map, 2 is the medium map
+room = Room(2)  # 0 is the empty box, 1 is the easy map, 2 is the medium map
 START_POS, walls, dots = room.create_map()
 
 # Create Pac-Man instance
@@ -30,9 +30,7 @@ orangeGhost = Ghost(orangePos[0], orangePos[1], random_dir(), ORANGE)
 pinkPos = random_pos()
 pinkGhost = Ghost(pinkPos[0], pinkPos[1], random_dir(), PINK)
 
-ghosts = [redGhost, greenGhost, orangeGhost, pinkGhost]
-movers = ghosts
-movers.append(pacman)
+movers = [redGhost, greenGhost, orangeGhost, pinkGhost, pacman]
 
 running = True
 while running:
@@ -53,7 +51,7 @@ while running:
             running = False
             sys.exit()
         elif event.type == pygame.KEYDOWN:
-            pacman.velocity = 0.4
+            pacman.velocity = 0.3
             if event.key == pygame.K_UP:
                 pacman.dir = "up"
             elif event.key == pygame.K_DOWN:

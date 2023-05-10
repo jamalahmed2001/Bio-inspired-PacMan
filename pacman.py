@@ -1,11 +1,22 @@
+import torch
+import numpy as np
+import torch.optim as optim
+import torch.nn as nn
 import pygame
 import random
 import math
+import time
+import random
+from deap import base, creator, tools
 
 # Game Constants
 SCREEN_WIDTH = 700
 SCREEN_HEIGHT = 750
 TILE_SIZE = 50
+MOVER_SIZE = TILE_SIZE//2
+clock = pygame.time.Clock()
+
+# colours
 BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 YELLOW = (255, 255, 0)
@@ -15,9 +26,9 @@ PINK = (255, 182, 193)
 GREEN = (34, 139, 34)
 ORANGE = (255, 165, 0)
 
+
 # PacMan setup
 PACMAN_SPEED = 0
-PACMAN_SIZE = TILE_SIZE//2
 PACMAN_DIR = "right"
 dotsEaten = 0
 
@@ -137,6 +148,11 @@ class Moveable():
         self.x = x
         self.y = y
         self.color = color
+        self.size = MOVER_SIZE
+        self.rect = pygame.Rect(
+            self.x-self.size, self.y-self.size, self.size*2, self.size*2)
+        self.distance_travelled = 0
+        self.distance_between = float("inf")
 
     # controls movement of the object
     def control(self, movers):
@@ -156,14 +172,15 @@ class Moveable():
         elif self.dir == "down":
             self.move(0, 1)
 
-            # defines how to move to a new position
+        # defines how to move to a new position
     def move(self, dx, dy):
         self.x = self.x + dx * self.velocity
         self.y = self.y + dy * self.velocity
         self.rect.x = self.x-self.size + dx * self.velocity
         self.rect.y = self.y-self.size + dy * self.velocity
+        self.distance_travelled += abs(dx) + abs(dy)
 
-    # detect wall collisions
+    # detect all collisions
     def collision(self, collider):
         coll = False
         for wall in walls:
@@ -171,33 +188,43 @@ class Moveable():
                 coll = True
         if self is not collider and self.rect.colliderect(collider.rect):
             coll = True
-        if coll and isinstance(self, PacMan):
-            self.velocity = 0
         if coll:
-            self.dir = random_dir()
+            # if coll and isinstance(self, PacMan):
+            #     self.velocity = 0
+            # if coll and not isinstance(self, PacMan):
+            #     # self.dir = random_dir()
+            if self.dir == "left":
+                self.dir = "up"
+            elif self.dir == "right":
+                self.dir = "down"
+            elif self.dir == "up":
+                self.dir = "right"
+            elif self.dir == "down":
+                self.dir = "left"
+        return coll
 
     def get_position(self):
         return self.x, self.y
 
+    def distance_travelled(self):
+        return self.distance_travelled
+
     def get_distance_from(self, mover):
         if self is not mover:
-            distance = math.sqrt((self.x - mover.x) **
-                                 2 + (self.y - mover.y) ** 2)
-        return distance
+            self.distance = math.sqrt((self.x - mover.x) **
+                                      2 + (self.y - mover.y) ** 2)
+        return self.distance_between
 
 
 class PacMan(Moveable):
     def __init__(self, x, y, color, dotsEaten):
         super(PacMan, self).__init__(x, y, color)
-        self.size = PACMAN_SIZE
         self.dir = PACMAN_DIR
         self.dotsEaten = dotsEaten
         self.velocity = PACMAN_SPEED
-        self.rect = pygame.Rect(
-            self.x-self.size, self.y-self.size, self.size*2, self.size*2)
 
     def draw(self, screen):
-        pygame.draw.circle(screen, self.color, (self.x, self.y), PACMAN_SIZE)
+        pygame.draw.circle(screen, self.color, (self.x, self.y), self.size)
 
     def dotCollision(self):
         for dot in dots:
@@ -209,12 +236,23 @@ class PacMan(Moveable):
 class Ghost(Moveable):
     def __init__(self, x, y, dir, color):
         super(Ghost, self).__init__(x, y, color)
-        self.size = TILE_SIZE//2
-        self.velocity = 0.4
+        self.velocity = 0.3
         self.dir = dir
-        self.rect = pygame.Rect(
-            self.x-self.size, self.y-self.size, self.size*2, self.size*2)
 
     def draw(self, screen):
         pygame.draw.rect(
             screen, self.color, self.rect)
+
+
+class GhostNetwork(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(GhostNetwork, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
