@@ -1,6 +1,4 @@
 import pygame
-from constants import *
-
 
 # screen dimensions
 SCREEN_WIDTH = 600
