@@ -6,27 +6,6 @@ import sys
 from pacman import *  # for pacman and the room
 
 
-class GhostBrain(nn.Module):
-    def __init__(self):
-        super(GhostBrain, self).__init__()
-        self.fc1 = nn.Linear(4, 32)
-        self.fc2 = nn.Linear(32, 4)
-        self.relu = nn.ReLU()
-        self.optimiser = torch.optim.SGD(self.parameters(), lr=0.00001)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        return x
-
-    def update_network(self, fitness):
-        self.optimiser.zero_grad()
-        loss = -torch.tensor(fitness, dtype=torch.float32, requires_grad=True)
-        loss.backward()
-        self.optimiser.step()
-
-
 pygame.init()
 pygame.font.init()
 
@@ -44,7 +23,7 @@ pacman = PacMan(START_POS[0], START_POS[1], YELLOW, dotsEaten)
 
 
 class PygameGhost:
-    def __init__(self, x, y, color, brain):
+    def __init__(self, x, y, color):
         # Initialize ghost attributes
         self.x = x
         self.y = y
@@ -59,7 +38,6 @@ class PygameGhost:
             self.x-self.size, self.y-self.size, self.size*2, self.size*2)
         self.num_collisions = 0
         self.collisions_with_pacman = 0
-        self.neural_network = brain
 
     def get_distance_from_walls(self, walls):
         for wall in walls:
@@ -93,6 +71,9 @@ class PygameGhost:
             self.num_collisions += 1
             if isinstance(collider, PacMan):
                 self.collisions_with_pacman += 1
+        return coll
+
+    def handle_coll(self, coll):
         if coll:  # move 90 degrees
             if self.dir == "left":
                 self.dir = "up"
@@ -102,17 +83,9 @@ class PygameGhost:
                 self.dir = "right"
             elif self.dir == "down":
                 self.dir = "left"
-        return coll
 
     # controls movement of the ghosts
-    def control(self, movers):
-
-        for mover in movers:
-            coll = self.detect_collision(mover)
-
-        # if coll:
-        #     self.brain()
-
+    def control(self):
         if self.dir == "left":
             self.move(-1, 0)
         elif self.dir == "right":
@@ -125,28 +98,8 @@ class PygameGhost:
     def get_num_collisions(self):
         return self.num_collisions
 
-    def brain(self):
-        inputs = self.get_inputs()
-
-        # Use the neural network to predict the action probabilities
-        action_probs = self.neural_network(
-            inputs.unsqueeze(0))
-
-        # Determine the index of the highest probability
-        max_prob_index = torch.argmax(action_probs).item()
-        directions = ["left", "right", "down", "up"]
-
-        optimal_dir = directions[max_prob_index]
-
-        return optimal_dir
-
     def update(self, optimal_dir):
         self.dir = optimal_dir
-
-    def get_inputs(self):
-        inputs = [self.x, self.y, self.velocity, self.distance_from_pacman]
-        inputs_tensor = torch.tensor(inputs, dtype=torch.float32)
-        return inputs_tensor
 
     def move(self, dx, dy):
         self.x = self.x + dx * self.velocity
@@ -155,47 +108,92 @@ class PygameGhost:
         self.rect.y = self.y-self.size + dy * self.velocity
         self.distance_travelled += abs(dx) + abs(dy)
 
-# Define the Ghost Chromosome
 
-
-class GhostChromosome:
-    def __init__(self, action, pygame_ghost):
-        self.ghost = pygame_ghost
-        self.action = action
-        self.fitness = 0
+class GhostFSM:
+    def __init__(self, pygame_ghost):
+        self.state = "Chase"  # Initial state
+        # Predefined target position for Scatter state
+        self.target_position = (0, 0)
         self.ghost = pygame_ghost
 
-    def compute_fitness(self):
-        # Compute fitness based on the ghost's attributes
-        dist = self.ghost.get_distance_from_pacman()
-        times_hit_pacman = self.ghost.get_collisions_with_pacman()
-        times_hit_wall = self.ghost.get_collisions()
-        fitness = 1 / (dist // TILE_SIZE + 1) + \
-            times_hit_pacman - times_hit_wall
+    def update(self):
+        # Update the FSM based on inputs and transition to the next state
 
-        if dist < 3 * TILE_SIZE:
-            fitness += 1
+        if self.state == "Chase":
+            for mover in movers:
+                coll = self.detect_collision(mover)
+            if coll:
+                self.state = "Bump"
 
-        self.fitness = fitness
+        elif self.state == "Bump":
+            for mover in movers:
+                coll = self.detect_collision(mover)
+            if not coll:
+                self.state = "Chase"
 
-        return fitness
+    def get_action(self):
+        # Determine the action to be performed based on the current state
 
-    def crossover(self, partner, crossover_prob):
-        # Perform crossover between two parent chromosomes to create offspring
-        if random.random() < crossover_prob:
-            offspring_action = [self.action[0]]
-        else:
-            offspring_action = [partner.action[0]]
-        return GhostChromosome(offspring_action, self.ghost)
+        if self.state == "Chase":
+            if pacman.x > self.ghost.x:
 
-    def mutate(self, mutation_rate):
-        # Perform mutation on the chromosome's action
-        mutated_action = self.action.copy()
-        for i in range(len(mutated_action)):
-            if random.random() < mutation_rate:
-                mutated_action[i] = random.choice(
-                    ["up", "down", "left", "right"])
-        return GhostChromosome(mutated_action, self.ghost)
+        elif self.state == "Bump":
+            self.ghost.handle_coll()
+
+
+            # Define the mutation rate
+mutation_rate = 0.1
+
+
+def mutate_fsm(fsm):
+    # Iterate through the FSM's states, transitions, or actions
+    for state in fsm.states:
+        # Check if mutation should occur for the current state
+        if random.random() < mutation_rate:
+            # Perform a mutation on the state
+            mutated_state = mutate_state(state)
+            # Update the state in the FSM
+            fsm.update_state(state, mutated_state)
+
+    for transition in fsm.transitions:
+        # Check if mutation should occur for the current transition
+        if random.random() < mutation_rate:
+            # Perform a mutation on the transition
+            mutated_transition = mutate_transition(transition)
+            # Update the transition in the FSM
+            fsm.update_transition(transition, mutated_transition)
+
+    for action in fsm.actions:
+        # Check if mutation should occur for the current action
+        if random.random() < mutation_rate:
+            # Perform a mutation on the action
+            mutated_action = mutate_action(action)
+            # Update the action in the FSM
+            fsm.update_action(action, mutated_action)
+
+
+def mutate_state(state):
+    # Implement the mutation operation for a state
+    # Example: Randomly change the name of the state
+    mutated_name = generate_mutated_name(state.name)
+    mutated_state = State(mutated_name)
+    return mutated_state
+
+
+def mutate_transition(transition):
+    # Implement the mutation operation for a transition
+    # Example: Randomly change the target state of the transition
+    mutated_target_state = random.choice(transition.valid_states)
+    mutated_transition = Transition(transition.input, mutated_target_state)
+    return mutated_transition
+
+
+def mutate_action(action):
+    # Implement the mutation operation for an action
+    # Example: Randomly change the behavior of the action
+    mutated_behavior = generate_mutated_behavior(action.behavior)
+    mutated_action = Action(mutated_behavior)
+    return mutated_action
 
 
 # Define constants
@@ -209,27 +207,11 @@ ghosts = []
 for _ in range(POPULATION_SIZE):
     pos = random_pos()
     colour = random.choice(colours)
-    pygame_ghost = PygameGhost(pos[0], pos[1], colour, GhostBrain())
+    pygame_ghost = PygameGhost(pos[0], pos[1], colour)
     colours.remove(colour)
     ghosts.append(pygame_ghost)
 
-# Main genetic algorithm loop
-POPULATION_SIZE = 4
-mutation_rate = 0.1
-num_generations = 10
-
 movers = ghosts + [pacman]
-
-
-# Initialize the population
-population = []
-
-for i in range(POPULATION_SIZE):
-    # Example: chromosome length of 10
-    action = [random.choice(["up", "down", "left", "right"])]
-    chromosome = GhostChromosome(action, ghosts[i])
-    population.append(chromosome)
-
 
 # Main game loop
 running = True
