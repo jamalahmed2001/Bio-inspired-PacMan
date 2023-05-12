@@ -5,32 +5,26 @@ import pygame
 import sys
 from pacman import *  # for pacman and the room
 
-"""
-IDEAS
-1. WALL COLLISIONS - FSM (hardcoded)
-2. SENSORS - "Look" 2/3 blocks ahead in all directions and get a list/tensor of objects 
-   in them: [object_up, object_down, object_left, object_right]. Can use top-left corner of ghost to find top-left corner of pacman_rect.
-3. Values for each object: 1 for an empty space, 5 for pacman
-4. In PygameGhost control(): sensor function and call update to do a forward pass using the object tensor as input and PygameGhost.update() to optimal direction
-5. Compute fitness in generation loop as soon as the ghost has done a forward pass. Possibly do 4 in this loop as well? Use fitness
-   to update_weights/network(). -- how?
-6. Need my own neural net to do this.
-"""
-
 
 class GhostBrain(nn.Module):
     def __init__(self):
         super(GhostBrain, self).__init__()
         self.fc1 = nn.Linear(4, 8)
-        self.fc2 = nn.Linear(8, 4)
+        self.fc2 = nn.Linear(8, 12)
+        self.fc3 = nn.Linear(12, 8)
+        self.fc4 = nn.Linear(8, 4)
         self.relu = nn.ReLU()
         self.optimiser = torch.optim.SGD(self.parameters(), lr=0.01)
-        self.ideal_fitness = 5
+        self.ideal_fitness = 3
 
     def forward(self, x):
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
+        x = self.relu(x)
+        x = self.fc3(x)
+        x = self.relu(x)
+        x = self.fc4(x)
         return x
 
     def update_network(self, fitness):
@@ -40,9 +34,6 @@ class GhostBrain(nn.Module):
         loss = loss_func(fitness, self.ideal_fitness)
         loss.backward()
         self.optimiser.step()
-
-# Custom MAE loss function
-# predicted: calculated fitness, target: ideal_fitness
 
 
 class MAELoss(nn.Module):
@@ -154,41 +145,45 @@ class PygameGhost:
         return self.num_collisions
 
     def sensor(self):
-        # 5 if its pacman, 1 if it's an empty space, 0 if it's a wall or another ghost
+        # 5 if its pacman, 1 if it's an empty space, -2 if it's a wall, -1 for another ghost
         # [object_up, object_down, object_left, object_right]
         objects_around = [1, 1, 1, 1]
 
         # for pacman detection
-        if (pacman.rect.x, pacman.rect.y) == (self.x, self.y-TILE_SIZE):  # check up
+        if (pacman.rect[0], pacman.rect[1]) == (self.rect[0], self.rect[1]-TILE_SIZE):  # check up
             objects_around[0] = 5
-        elif (pacman.rect.x, pacman.rect.y) == (self.x, self.y+TILE_SIZE):  # check  down
+        elif (pacman.rect[0], pacman.rect[1]) == (self.rect[0], self.rect[1]+TILE_SIZE):  # check  down
             objects_around[1] = 5
-        elif (pacman.rect.x, pacman.rect.y) == (self.x-TILE_SIZE, self.y):  # check left
+        elif (pacman.rect[0], pacman.rect[1]) == (self.rect[0]-TILE_SIZE, self.rect[1]):  # check left
             objects_around[2] = 5
-        elif (pacman.rect.x, pacman.rect.y) == (self.x+TILE_SIZE, self.y):  # check right
+        elif (pacman.rect[0], pacman.rect[1]) == (self.rect[0]+TILE_SIZE, self.rect[1]):  # check right
             objects_around[3] = 5
 
         # for walls
         for wall in walls:
-            if (wall[0], wall[1]) == (self.x, self.y-TILE_SIZE):  # check up
-                objects_around[0] = -0
-            elif (wall[0], wall[1]) == (self.x, self.y+TILE_SIZE):  # check  down
-                objects_around[1] = 0
-            elif (wall[0], wall[1]) == (self.x-TILE_SIZE, self.y):  # check left
-                objects_around[2] = 0
-            elif (wall[0], wall[1]) == (self.x+TILE_SIZE, self.y):  # check right
-                objects_around[3] = 0
+            if (wall[0], wall[1]) == (self.rect[0], self.rect[1]-TILE_SIZE):  # check up
+                objects_around[0] = -2
+            elif (wall[0], wall[1]) == (self.rect[0], self.rect[1]+TILE_SIZE):  # check  down
+                objects_around[1] = -2
+            elif (wall[0], wall[1]) == (self.rect[0]-TILE_SIZE, self.rect[1]):  # check left
+                objects_around[2] = -2
+            elif (wall[0], wall[1]) == (self.rect[0]+TILE_SIZE, self.rect[1]):  # check right
+                objects_around[3] = -2
 
          # for ghosts
         for ghost in ghosts:
-            if (ghost.rect.x, ghost.rect.y) == (self.x, self.y-TILE_SIZE):  # check up
-                objects_around[0] = 0
-            elif (ghost.rect.x, ghost.rect.y) == (self.x, self.y+TILE_SIZE):  # check  down
-                objects_around[1] = 0
-            elif (ghost.rect.x, ghost.rect.y) == (self.x-TILE_SIZE, self.y):  # check left
-                objects_around[2] = 0
-            elif (ghost.rect.x, ghost.rect.y) == (self.x+TILE_SIZE, self.y):  # check right
-                objects_around[3] = 0
+            if ghost is not self:
+                if (ghost.rect[0], ghost.rect[1]) == (self.rect[0], self.rect[1]-TILE_SIZE):  # check up
+                    objects_around[0] = -1
+                # check  down
+                elif (ghost.rect[0], ghost.rect[1]) == (self.rect[0], self.rect[1]+TILE_SIZE):
+                    objects_around[1] = -1
+                # check left
+                elif (ghost.rect[0], ghost.rect[1]) == (self.rect[0]-TILE_SIZE, self.rect[1]):
+                    objects_around[2] = -1
+                # check right
+                elif (ghost.rect[0], ghost.rect[1]) == (self.rect[0]+TILE_SIZE, self.rect[1]):
+                    objects_around[3] = -1
 
         return objects_around
 
@@ -229,16 +224,19 @@ class GhostChromosome:
         self.fitness = 0
         self.ghost = pygame_ghost
 
+    #  simplified fitness func for now, need to properly update weights of model
+
     def compute_fitness(self):
         # Compute fitness based on the ghost's attributes
         dist = self.ghost.get_distance_from_pacman()
         times_hit_pacman = self.ghost.get_collisions_with_pacman()
         times_hit_wall = self.ghost.get_collisions()
-        fitness = 1 / (dist // TILE_SIZE + 1) + \
-            times_hit_pacman - times_hit_wall
+        fitness = 1 / (dist // TILE_SIZE + 1)
+        # + \
+        #     times_hit_pacman - times_hit_wall
 
-        if dist < 3 * TILE_SIZE:
-            fitness += 1
+        # if dist < 3 * TILE_SIZE:
+        #     fitness += 1
 
         self.fitness = fitness
 
@@ -262,10 +260,10 @@ class GhostChromosome:
         return GhostChromosome(mutated_action, self.ghost)
 
 
-# Define constants
+# GA setup
 POPULATION_SIZE = 4
-mutation_rate = 0.3
-max_gen = 50
+mutation_rate = 0.1
+num_generations = 10
 
 colours = [PINK, ORANGE, GREEN, RED]
 # Initialize the ghosts
@@ -277,13 +275,8 @@ for _ in range(POPULATION_SIZE):
     colours.remove(colour)
     ghosts.append(pygame_ghost)
 
-# Main genetic algorithm loop
-POPULATION_SIZE = 4
-mutation_rate = 0.1
-num_generations = 10
-
+# moveable characters
 movers = ghosts + [pacman]
-
 
 # Initialize the population
 population = []
@@ -298,6 +291,8 @@ for i in range(POPULATION_SIZE):
 # Main game loop
 running = True
 i = 0
+for ghost in ghosts:
+    ghost.neural_network.train()
 generation = 0
 while running:
 
@@ -307,6 +302,8 @@ while running:
     pacman.draw(screen)
     for ghost in ghosts:
         ghost.draw(screen)
+    score_text = font.render(f'Score: {pacman.dotsEaten}', False, (WHITE))
+    screen.blit(score_text, (10, 10))
 
     # Event handling
     for event in pygame.event.get():
@@ -336,6 +333,11 @@ while running:
                 chromosome.ghost.update(optimal_dir)
                 chromosome.ghost.neural_network.update_network(
                     chromosome.compute_fitness())
+                # if i == 0:
+                # # Print or inspect the weights after the update
+                # for name, param in chromosome.ghost.neural_network.named_parameters():
+                #     if param.requires_grad:
+                #         print(name, param.data)
 
             # Compute average fitness
             total_fitness = sum(
@@ -345,14 +347,26 @@ while running:
             # Find the top fitness
             top_fitness = max(chromosome.fitness for chromosome in population)
 
-            # # Print the average fitness and top fitness
+            # Print the average fitness and top fitness
             # print("Generation:", generation)
             # print("Average Fitness:", average_fitness)
             # print("Top Fitness:", top_fitness)
 
-            # Select parents for reproduction
-            parents = sorted(
-                population, key=lambda x: x.fitness, reverse=True)[:2]
+            # Select parents for reproduction using rank selection
+            fitness_sorted = sorted(
+                population, key=lambda x: x.fitness, reverse=True)
+            ranked_population = [i for n, i in enumerate(fitness_sorted, 1)]
+            total_rank = sum(range(1, POPULATION_SIZE+1))
+            parents = []
+            for i in range(2):
+                pick = random.uniform(0, total_rank)
+                current = 0
+                for chromosome in ranked_population:
+                    current += POPULATION_SIZE - \
+                        ranked_population.index(chromosome)
+                    if current > pick:
+                        parents.append(chromosome)
+                        break
 
             # Create offspring through crossover and mutation
             offspring = []
@@ -368,14 +382,15 @@ while running:
             # resetting the collisions_with_pacman for each PygameGhost
             for child in offspring:
                 child.ghost.collisions_with_pacman = 0
+                child.ghost.num_collisions = 0
 
             # Replace the population with the offspring
             population = offspring
 
             # Select the best chromosome from the final population
-            best_chromosome = max(population, key=lambda x: x.fitness)
+            # best_chromosome = max(population, key=lambda x: x.fitness)
 
-            ghost.update(best_chromosome.action)
+            # ghost.update(best_chromosome.action)
     i += 1
 
     # Update the display
