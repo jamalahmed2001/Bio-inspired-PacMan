@@ -21,10 +21,11 @@ IDEAS
 class GhostBrain(nn.Module):
     def __init__(self):
         super(GhostBrain, self).__init__()
-        self.fc1 = nn.Linear(4, 32)
-        self.fc2 = nn.Linear(32, 4)
+        self.fc1 = nn.Linear(4, 8)
+        self.fc2 = nn.Linear(8, 4)
         self.relu = nn.ReLU()
-        self.optimiser = torch.optim.SGD(self.parameters(), lr=0.00001)
+        self.optimiser = torch.optim.SGD(self.parameters(), lr=0.01)
+        self.ideal_fitness = 5
 
     def forward(self, x):
         x = self.fc1(x)
@@ -34,9 +35,25 @@ class GhostBrain(nn.Module):
 
     def update_network(self, fitness):
         self.optimiser.zero_grad()
-        loss = -torch.tensor(fitness, dtype=torch.float32, requires_grad=True)
+        fitness = torch.tensor(
+            fitness, dtype=torch.float32, requires_grad=True)
+        loss = loss_func(fitness, self.ideal_fitness)
         loss.backward()
         self.optimiser.step()
+
+# Custom MAE loss function
+# predicted: calculated fitness, target: ideal_fitness
+
+
+class MAELoss(nn.Module):
+    def __init__(self):
+        super(MAELoss, self).__init__()
+
+    def forward(self, predicted, target):
+        return torch.mean(torch.abs(predicted - target))
+
+
+loss_func = MAELoss()
 
 
 pygame.init()
@@ -136,8 +153,49 @@ class PygameGhost:
     def get_num_collisions(self):
         return self.num_collisions
 
-    def brain(self):
-        inputs = self.get_inputs()
+    def sensor(self):
+        # 5 if its pacman, 1 if it's an empty space, 0 if it's a wall or another ghost
+        # [object_up, object_down, object_left, object_right]
+        objects_around = [1, 1, 1, 1]
+
+        # for pacman detection
+        if (pacman.rect.x, pacman.rect.y) == (self.x, self.y-TILE_SIZE):  # check up
+            objects_around[0] = 5
+        elif (pacman.rect.x, pacman.rect.y) == (self.x, self.y+TILE_SIZE):  # check  down
+            objects_around[1] = 5
+        elif (pacman.rect.x, pacman.rect.y) == (self.x-TILE_SIZE, self.y):  # check left
+            objects_around[2] = 5
+        elif (pacman.rect.x, pacman.rect.y) == (self.x+TILE_SIZE, self.y):  # check right
+            objects_around[3] = 5
+
+        # for walls
+        for wall in walls:
+            if (wall[0], wall[1]) == (self.x, self.y-TILE_SIZE):  # check up
+                objects_around[0] = -0
+            elif (wall[0], wall[1]) == (self.x, self.y+TILE_SIZE):  # check  down
+                objects_around[1] = 0
+            elif (wall[0], wall[1]) == (self.x-TILE_SIZE, self.y):  # check left
+                objects_around[2] = 0
+            elif (wall[0], wall[1]) == (self.x+TILE_SIZE, self.y):  # check right
+                objects_around[3] = 0
+
+         # for ghosts
+        for ghost in ghosts:
+            if (ghost.rect.x, ghost.rect.y) == (self.x, self.y-TILE_SIZE):  # check up
+                objects_around[0] = 0
+            elif (ghost.rect.x, ghost.rect.y) == (self.x, self.y+TILE_SIZE):  # check  down
+                objects_around[1] = 0
+            elif (ghost.rect.x, ghost.rect.y) == (self.x-TILE_SIZE, self.y):  # check left
+                objects_around[2] = 0
+            elif (ghost.rect.x, ghost.rect.y) == (self.x+TILE_SIZE, self.y):  # check right
+                objects_around[3] = 0
+
+        return objects_around
+
+    def forward(self):
+        inputs = self.sensor()  # get sensor inputs
+
+        inputs = torch.tensor(inputs, dtype=torch.float32)
 
         # Use the neural network to predict the action probabilities
         action_probs = self.neural_network(
@@ -145,7 +203,7 @@ class PygameGhost:
 
         # Determine the index of the highest probability
         max_prob_index = torch.argmax(action_probs).item()
-        directions = ["left", "right", "down", "up"]
+        directions = ["up", "down", "right", "left"]
 
         optimal_dir = directions[max_prob_index]
 
@@ -153,11 +211,6 @@ class PygameGhost:
 
     def update(self, optimal_dir):
         self.dir = optimal_dir
-
-    def get_inputs(self):
-        inputs = [self.x, self.y, self.velocity, self.distance_from_pacman]
-        inputs_tensor = torch.tensor(inputs, dtype=torch.float32)
-        return inputs_tensor
 
     def move(self, dx, dy):
         self.x = self.x + dx * self.velocity
@@ -279,8 +332,7 @@ while running:
         if i % 131 == 0:
             generation += 1
             for i, chromosome in enumerate(population):
-                optimal_dir = chromosome.ghost.brain()
-                print(i, optimal_dir)
+                optimal_dir = chromosome.ghost.forward()
                 chromosome.ghost.update(optimal_dir)
                 chromosome.ghost.neural_network.update_network(
                     chromosome.compute_fitness())
@@ -320,10 +372,10 @@ while running:
             # Replace the population with the offspring
             population = offspring
 
-            # # Select the best chromosome from the final population
-            # best_chromosome = max(population, key=lambda x: x.fitness)
+            # Select the best chromosome from the final population
+            best_chromosome = max(population, key=lambda x: x.fitness)
 
-            # ghost.update(best_chromosome.action)
+            ghost.update(best_chromosome.action)
     i += 1
 
     # Update the display
