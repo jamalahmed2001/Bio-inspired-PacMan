@@ -7,7 +7,6 @@ import random
 import math
 import time
 import random
-from deap import base, creator, tools
 
 # Game Constants
 SCREEN_WIDTH = 700
@@ -172,6 +171,16 @@ class Moveable():
         elif self.dir == "down":
             self.move(0, 1)
 
+    def handle_coll(self):
+        if self.dir == "left":
+            self.dir = "up"
+        elif self.dir == "right":
+            self.dir = "down"
+        elif self.dir == "up":
+            self.dir = "right"
+        elif self.dir == "down":
+            self.dir = "left"
+
         # defines how to move to a new position
     def move(self, dx, dy):
         self.x = self.x + dx * self.velocity
@@ -188,11 +197,9 @@ class Moveable():
                 coll = True
         if self is not collider and self.rect.colliderect(collider.rect):
             coll = True
-        if coll:
-            # if coll and isinstance(self, PacMan):
-            #     self.velocity = 0
-            # if coll and not isinstance(self, PacMan):
-            #     # self.dir = random_dir()
+        if coll and isinstance(self, PacMan):
+            self.velocity = 0
+        elif coll:
             if self.dir == "left":
                 self.dir = "up"
             elif self.dir == "right":
@@ -209,10 +216,10 @@ class Moveable():
     def distance_travelled(self):
         return self.distance_travelled
 
-    def get_distance_from(self, mover):
+    def get_distance_between(self, mover):
         if self is not mover:
-            self.distance = math.sqrt((self.x - mover.x) **
-                                      2 + (self.y - mover.y) ** 2)
+            self.distance_between = math.sqrt((self.x - mover.x) **
+                                              2 + (self.y - mover.y) ** 2)
         return self.distance_between
 
 
@@ -242,17 +249,3 @@ class Ghost(Moveable):
     def draw(self, screen):
         pygame.draw.rect(
             screen, self.color, self.rect)
-
-
-class GhostNetwork(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(GhostNetwork, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, output_size)
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        return x

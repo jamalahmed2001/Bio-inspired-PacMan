@@ -3,40 +3,7 @@ import numpy as np
 import random
 import pygame
 import sys
-from pacman import *  # for pacman and the room
-
-"""
-IDEAS
-1. WALL COLLISIONS - FSM (hardcoded)
-2. SENSORS - "Look" 2/3 blocks ahead in all directions and get a list/tensor of objects 
-   in them: [object_up, object_down, object_left, object_right]. Can use top-left corner of ghost to find top-left corner of pacman_rect.
-3. Values for each object: 1 for an empty space, 5 for pacman
-4. In PygameGhost control(): sensor function and call update to do a forward pass using the object tensor as input and PygameGhost.update() to optimal direction
-5. Compute fitness in generation loop as soon as the ghost has done a forward pass. Possibly do 4 in this loop as well? Use fitness
-   to update_weights/network(). -- how?
-6. Need my own neural net to do this.
-"""
-
-
-class GhostBrain(nn.Module):
-    def __init__(self):
-        super(GhostBrain, self).__init__()
-        self.fc1 = nn.Linear(4, 32)
-        self.fc2 = nn.Linear(32, 4)
-        self.relu = nn.ReLU()
-        self.optimiser = torch.optim.SGD(self.parameters(), lr=0.00001)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
-        return x
-
-    def update_network(self, fitness):
-        self.optimiser.zero_grad()
-        loss = -torch.tensor(fitness, dtype=torch.float32, requires_grad=True)
-        loss.backward()
-        self.optimiser.step()
+from pacman import *
 
 
 pygame.init()
@@ -47,8 +14,16 @@ screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Pac-Man")
 font = pygame.font.Font(None, 36)
 
+# Check if argument is provided
+if len(sys.argv) > 1:
+    # Access the first argument
+    argument = sys.argv[1]
+else:
+    argument = 0
+
 # Create Room instance
-room = Room(0)  # 0 is the empty box, 1 is the easy map, 2 is the medium map
+# 0 is an empty room, 1 is an eays map, and 2 is a medium-difficulty map
+room = Room(int(argument))
 START_POS, walls, dots = room.create_map()
 
 # Create Pac-Man instance
@@ -56,7 +31,7 @@ pacman = PacMan(START_POS[0], START_POS[1], YELLOW, dotsEaten)
 
 
 class PygameGhost:
-    def __init__(self, x, y, color, brain):
+    def __init__(self, x, y, color):
         # Initialize ghost attributes
         self.x = x
         self.y = y
@@ -71,7 +46,9 @@ class PygameGhost:
             self.x-self.size, self.y-self.size, self.size*2, self.size*2)
         self.num_collisions = 0
         self.collisions_with_pacman = 0
-        self.neural_network = brain
+        self.collisions_with_walls = 0
+        self.collisions_with_ghosts = 0
+        self.distance_from_pacman_prev = 0
 
     def get_distance_from_walls(self, walls):
         for wall in walls:
@@ -81,11 +58,9 @@ class PygameGhost:
     def get_collisions_with_pacman(self):
         return self.collisions_with_pacman
 
-    def get_collisions(self):
-        return self.num_collisions
-
     def get_distance_from_pacman(self):
         pacman_x, pacman_y = pacman.get_position()
+        self.distance_from_pacman_prev = self.distance_from_pacman  # Update previous distance
         self.distance_from_pacman = math.sqrt(
             ((self.x-TILE_SIZE) - pacman_x) ** 2 + ((self.y-TILE_SIZE) - pacman_y) ** 2)
         return self.distance_from_pacman
@@ -100,9 +75,11 @@ class PygameGhost:
             if self.rect.colliderect(wall):
                 coll = True
                 self.num_collisions += 1
+                self.collisions_with_walls += 1
         if self is not collider and self.rect.colliderect(collider.rect):
             coll = True
             self.num_collisions += 1
+            self.collisions_with_ghosts += 1
             if isinstance(collider, PacMan):
                 self.collisions_with_pacman += 1
         if coll:  # move 90 degrees
@@ -116,13 +93,14 @@ class PygameGhost:
                 self.dir = "left"
         return coll
 
+    def get_position(self):
+        return self.x, self.y
+
     # controls movement of the ghosts
     def control(self, movers):
 
         for mover in movers:
             self.detect_collision(mover)
-
-        self.sensor()
 
         if self.dir == "left":
             self.move(-1, 0)
@@ -136,28 +114,8 @@ class PygameGhost:
     def get_num_collisions(self):
         return self.num_collisions
 
-    def brain(self):
-        inputs = self.get_inputs()
-
-        # Use the neural network to predict the action probabilities
-        action_probs = self.neural_network(
-            inputs.unsqueeze(0))
-
-        # Determine the index of the highest probability
-        max_prob_index = torch.argmax(action_probs).item()
-        directions = ["left", "right", "down", "up"]
-
-        optimal_dir = directions[max_prob_index]
-
-        return optimal_dir
-
-    def update(self, optimal_dir):
-        self.dir = optimal_dir
-
-    def get_inputs(self):
-        inputs = [self.x, self.y, self.velocity, self.distance_from_pacman]
-        inputs_tensor = torch.tensor(inputs, dtype=torch.float32)
-        return inputs_tensor
+    def update(self, dir_list):
+        self.dir = dir_list[0]
 
     def move(self, dx, dy):
         self.x = self.x + dx * self.velocity
@@ -166,9 +124,8 @@ class PygameGhost:
         self.rect.y = self.y-self.size + dy * self.velocity
         self.distance_travelled += abs(dx) + abs(dy)
 
+
 # Define the Ghost Chromosome
-
-
 class GhostChromosome:
     def __init__(self, action, pygame_ghost):
         self.ghost = pygame_ghost
@@ -180,15 +137,13 @@ class GhostChromosome:
         # Compute fitness based on the ghost's attributes
         dist = self.ghost.get_distance_from_pacman()
         times_hit_pacman = self.ghost.get_collisions_with_pacman()
-        times_hit_wall = self.ghost.get_collisions()
         fitness = 1 / (dist // TILE_SIZE + 1) + \
-            times_hit_pacman - times_hit_wall
+            times_hit_pacman  # incentivising ghosts to hit pacman
 
-        if dist < 3 * TILE_SIZE:
+        if dist < 3 * TILE_SIZE:  # incentivising ghosts to get closer to pacman
             fitness += 1
 
         self.fitness = fitness
-
         return fitness
 
     def crossover(self, partner, crossover_prob):
@@ -220,7 +175,7 @@ ghosts = []
 for _ in range(POPULATION_SIZE):
     pos = random_pos()
     colour = random.choice(colours)
-    pygame_ghost = PygameGhost(pos[0], pos[1], colour, GhostBrain())
+    pygame_ghost = PygameGhost(pos[0], pos[1], colour)
     colours.remove(colour)
     ghosts.append(pygame_ghost)
 
@@ -230,7 +185,6 @@ mutation_rate = 0.1
 num_generations = 10
 
 movers = ghosts + [pacman]
-
 
 # Initialize the population
 population = []
@@ -254,6 +208,9 @@ while running:
     pacman.draw(screen)
     for ghost in ghosts:
         ghost.draw(screen)
+    # Display score
+    score_text = font.render(f'Score: {pacman.dotsEaten}', False, (WHITE))
+    screen.blit(score_text, (10, 10))
 
     # Event handling
     for event in pygame.event.get():
@@ -278,12 +235,9 @@ while running:
         ghost.control(movers)
         if i % 131 == 0:
             generation += 1
-            for i, chromosome in enumerate(population):
-                optimal_dir = chromosome.ghost.brain()
-                print(i, optimal_dir)
-                chromosome.ghost.update(optimal_dir)
-                chromosome.ghost.neural_network.update_network(
-                    chromosome.compute_fitness())
+            # print("generation: ", generation)
+            for chromosome in population:
+                chromosome.compute_fitness()
 
             # Compute average fitness
             total_fitness = sum(
@@ -293,10 +247,13 @@ while running:
             # Find the top fitness
             top_fitness = max(chromosome.fitness for chromosome in population)
 
-            # # Print the average fitness and top fitness
-            # print("Generation:", generation)
-            # print("Average Fitness:", average_fitness)
-            # print("Top Fitness:", top_fitness)
+            # Print fitness scores to a text file
+            with open("fitness_per_gen.txt", "a+") as file:
+                # Append data to the file
+                file.write(
+                    f"Generation: {int(generation)}   Average Fitness: {average_fitness: .3f}    Top Fitness: {top_fitness: .3f}")
+                # Add a new line after appending
+                file.write("\n")
 
             # Select parents for reproduction
             parents = sorted(
@@ -320,10 +277,10 @@ while running:
             # Replace the population with the offspring
             population = offspring
 
-            # # Select the best chromosome from the final population
-            # best_chromosome = max(population, key=lambda x: x.fitness)
+            # Select the best chromosome from the final population
+            best_chromosome = max(population, key=lambda x: x.fitness)
 
-            # ghost.update(best_chromosome.action)
+            ghost.update(best_chromosome.action)
     i += 1
 
     # Update the display
